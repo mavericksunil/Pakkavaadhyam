@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pakkavadyam — AI accompanist prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gotu&family=Hind:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#E6ECEE; --surface:#F7F9F9; --ink:#1E2A4A; --muted:#5B6782;
+  --brass:#A97A22; --kumkum:#B3263A; --line:#C9D3D8; --lane:#D7DFE3;
+  --voice:#1E2A4A; --instr:#C08A23;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#121829; --surface:#1B2238; --ink:#EDE6D6; --muted:#9AA3BC;
+    --brass:#D9A845; --kumkum:#E0566A; --line:#2C3552; --lane:#252D47;
+    --voice:#EDE6D6; --instr:#D9A845;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121829; --surface:#1B2238; --ink:#EDE6D6; --muted:#9AA3BC;
+  --brass:#D9A845; --kumkum:#E0566A; --line:#2C3552; --lane:#252D47;
+  --voice:#EDE6D6; --instr:#D9A845;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"Hind",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.5;
+  -webkit-tap-highlight-color:transparent}
+main{max-width:720px;margin:0 auto;padding:20px 16px 40px}
+header h1{font-family:"Gotu","Hind",Georgia,serif;font-weight:400;font-size:clamp(2rem,8vw,2.8rem);
+  line-height:1.05;margin:4px 0 6px;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted);max-width:52ch}
+
+.stage{margin-top:18px;background:var(--surface);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.readout{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:14px 16px 6px}
+.swara{font-family:"Gotu",Georgia,serif;font-size:2.6rem;line-height:1;min-width:3ch;color:var(--kumkum)}
+.swara small{font-family:"Hind",sans-serif;font-size:.9rem;color:var(--muted);margin-left:6px}
+.meta{text-align:right;color:var(--muted);font-size:.9rem;line-height:1.35}
+.legend{display:flex;gap:14px;justify-content:flex-end;font-size:.85rem}
+.legend span::before{content:"";display:inline-block;width:14px;height:3px;border-radius:2px;margin-right:6px;vertical-align:middle;background:currentColor}
+.lv{color:var(--voice)} .li{color:var(--instr)}
+canvas{display:block;width:100%;height:260px}
+.meter{height:6px;margin:0 16px;border-radius:3px;background:var(--lane);overflow:hidden}
+#meterBar{height:100%;width:0;background:var(--brass);transition:width 60ms linear}
+.go{display:flex;gap:10px;padding:12px 16px 16px;align-items:center;flex-wrap:wrap}
+button.primary{appearance:none;border:0;border-radius:999px;padding:14px 26px;font:600 1.05rem "Hind",sans-serif;
+  background:var(--ink);color:var(--bg);cursor:pointer;min-width:200px}
+button.primary.on{background:var(--kumkum);color:#fff}
+.status{color:var(--muted);font-size:.92rem;flex:1;min-width:180px}
+.status.err{color:var(--kumkum)}
+
+.controls{margin-top:20px;display:grid;gap:18px}
+fieldset{border:0;margin:0;padding:0}
+legend,.lbl{font-weight:600;font-size:.95rem;margin-bottom:8px;display:block}
+.hint{color:var(--muted);font-size:.85rem;margin-top:6px}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chips label{position:relative}
+.chips input{position:absolute;opacity:0;inset:0}
+.chips span{display:inline-block;padding:10px 16px;border-radius:12px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-weight:500}
+.chips input:checked+span{border-color:var(--brass);background:var(--brass);color:#fff}
+.chips input:focus-visible+span{outline:2px solid var(--kumkum);outline-offset:2px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+select{width:100%;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:500 1rem "Hind",sans-serif}
+input[type=range]{width:100%;accent-color:var(--brass)}
+.slider{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px}
+.slider output{color:var(--muted);font-size:.9rem;min-width:5ch;text-align:right}
+.toggle{display:flex;align-items:center;gap:10px;font-weight:600}
+.toggle input{width:22px;height:22px;accent-color:var(--brass)}
+.note{margin-top:22px;padding:14px 16px;border-left:3px solid var(--brass);background:var(--surface);border-radius:0 12px 12px 0;color:var(--muted);font-size:.92rem}
+.note strong{color:var(--ink)}
+:focus-visible{outline:2px solid var(--kumkum);outline-offset:2px}
+@media (max-width:420px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>Pakkavadyam</h1>
+  <p>Sing a line. The instrument follows your voice as you sing it, in your shruti and raga.</p>
+</header>
+
+<section class="stage" aria-label="Live pitch view">
+  <div class="readout">
+    <div class="swara" id="swara" aria-live="polite">–</div>
+    <div class="meta">
+      <div class="legend"><span class="lv">Your voice</span><span class="li">Instrument</span></div>
+      <div id="latency">Estimated delay: –</div>
+    </div>
+  </div>
+  <canvas id="trace" aria-hidden="true"></canvas>
+  <div class="meter" aria-hidden="true"><div id="meterBar"></div></div>
+  <div class="go">
+    <button class="primary" id="start">Start listening</button>
+    <div class="status" id="status">Choose headphones or speaker below, then tap Start and sing.</div>
+  </div>
+</section>
+
+<section class="controls">
+  <fieldset>
+    <legend>Listening on</legend>
+    <div class="chips" id="outputs">
+      <label><input type="radio" name="out" value="headphones" checked><span>Headphones</span></label>
+      <label><input type="radio" name="out" value="speaker"><span>Phone speaker</span></label>
+    </div>
+    <div class="hint" id="outHint">Tightest feel. Wired headphones work best.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Instrument</legend>
+    <div class="chips" id="instruments">
+      <label><input type="radio" name="inst" value="violin" checked><span>Violin</span></label>
+      <label><input type="radio" name="inst" value="harmonium"><span>Harmonium</span></label>
+      <label><input type="radio" name="inst" value="flute"><span>Flute</span></label>
+    </div>
+    <div class="hint" id="instHint">Violin follows every glide and gamaka.</div>
+  </fieldset>
+
+  <div class="row">
+    <div>
+      <label class="lbl" for="shruti">Shruti (Sa)</label>
+      <select id="shruti"></select>
+    </div>
+    <div>
+      <label class="lbl" for="raga">Raga</label>
+      <select id="raga"></select>
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label class="lbl" for="octave">Instrument octave</label>
+      <select id="octave">
+        <option value="-1">One lower</option>
+        <option value="0" selected>Same as voice</option>
+        <option value="1">One higher</option>
+      </select>
+    </div>
+    <div>
+      <label class="lbl" for="snap">Pitch</label>
+      <select id="snap">
+        <option value="auto" selected>Instrument default</option>
+        <option value="free">Follow freely</option>
+        <option value="raga">Snap to raga notes</option>
+      </select>
+    </div>
+  </div>
+
+  <div>
+    <label class="lbl" for="glide">How closely it follows</label>
+    <div class="slider"><input type="range" id="glide" min="2" max="80" value="14"><output id="glideOut">14 ms</output></div>
+    <div class="hint">Lower is tighter and more exact; higher sounds smoother and more relaxed.</div>
+  </div>
+
+  <div>
+    <label class="lbl" for="vol">Instrument volume</label>
+    <div class="slider"><input type="range" id="vol" min="0" max="100" value="70"><output id="volOut">70</output></div>
+  </div>
+
+  <div>
+    <label class="lbl" for="sens">Mic sensitivity</label>
+    <div class="slider"><input type="range" id="sens" min="0" max="100" value="60"><output id="sensOut">60</output></div>
+    <div class="hint">Raise it if the instrument stays silent; lower it if it plays on background noise.</div>
+  </div>
+
+  <div>
+    <label class="toggle"><input type="checkbox" id="drone" checked> Tambura drone</label>
+    <div class="slider" style="margin-top:8px"><input type="range" id="droneVol" min="0" max="100" value="35" aria-label="Tambura volume"><output id="droneOut">35</output></div>
+  </div>
+</section>
+
+<div class="note">
+  <strong>Headphones or speaker?</strong> Wired headphones give the tightest follow, roughly 30–60 ms behind your voice. On the phone speaker, the app switches on echo cancellation so it doesn't chase its own sound; that adds a little delay and works best with the phone a short distance away and the instrument volume moderate. Avoid Bluetooth earbuds or speakers: they add 150–250 ms, which turns accompaniment into an echo.
+</div>
+</main>
+
+<script>
+(() => {
+  // ---------- Musical data ----------
+  const SWARA = ["S","R1","R2","G2","G3","M1","M2","P","D1","D2","N2","N3"];
+  const RAGAS = {
+    "Shankarabharanam":[0,2,4,5,7,9,11],
+    "Kalyani":[0,2,4,6,7,9,11],
+    "Mayamalavagowla":[0,1,4,5,7,8,11],
+    "Kharaharapriya":[0,2,3,5,7,9,10],
+    "Mohanam":[0,2,4,7,9],
+    "Hindolam":[0,3,5,8,10],
+    "Hamsadhwani":[0,2,4,7,11],
+    "Sindhu Bhairavi (all 12)":[0,1,2,3,4,5,6,7,8,9,10,11]
+  };
+  const KATTAI = [["1 kattai (C)",0],["1½ (C#)",1],["2 (D)",2],["2½ (D#)",3],["3 (E)",4],["4 (F)",5],
+                  ["4½ (F#)",6],["5 (G)",7],["5½ (G#)",8],["6 (A)",9],["6½ (A#)",10],["7 (B)",11]];
+  const C3 = 130.8128;
+
+  const $ = id => document.getElementById(id);
+  const shrutiSel = $("shruti"), ragaSel = $("raga");
+  KATTAI.forEach(([n,v]) => shrutiSel.add(new Option(n,v)));
+  shrutiSel.value = "0";
+  Object.keys(RAGAS).forEach(r => ragaSel.add(new Option(r,r)));
+
+  const state = {
+    inst:"violin", sa:C3, raga:RAGAS["Shankarabharanam"], octave:0, snap:"auto",
+    glide:0.014, vol:0.7, sens:0.6, drone:true, droneVol:0.35, output:"headphones"
+  };
+  const outHints = {
+    headphones:"Tightest feel. Wired headphones work best.",
+    speaker:"Echo cancellation is on so it won't chase its own sound. Keep the volume moderate."
+  };
+  const hints = {
+    violin:"Violin follows every glide and gamaka.",
+    harmonium:"Harmonium plays the nearest raga note, the way a harmonium player would.",
+    flute:"Flute follows your glides with a soft, breathy tone."
+  };
+
+  // Audio state is declared first so the controls can safely reference it on load
+  let ctx=null, stream=null, micSrc=null, micHp=null, analyser=null, master=null, instr=null, droneGain=null, droneTimer=null, pollTimer=null;
+  let running=false, buf=null, down=null;
+  let held=null, lastF=null, octaveSkip=0, ampSmooth=0;
+  // ---------- UI wiring ----------
+  document.querySelectorAll('input[name=inst]').forEach(r => r.addEventListener("change", e => {
+    state.inst = e.target.value; $("instHint").textContent = hints[state.inst]; rebuildInstrument();
+  }));
+  shrutiSel.addEventListener("change", () => { state.sa = C3*Math.pow(2, +shrutiSel.value/12); restartDrone(); });
+  document.querySelectorAll('input[name=out]').forEach(r => r.addEventListener("change", async e => {
+    state.output = e.target.value; $("outHint").textContent = outHints[state.output];
+    if(state.output==="speaker" && +$("vol").value>60){ $("vol").value=55; $("vol").dispatchEvent(new Event("input")); }
+    if(running){ try{ await openMic(); setStatus(state.output==="speaker"?"Listening on speaker. Sing a line.":"Listening on headphones. Sing a line."); }
+      catch(err){ setStatus("Couldn't switch the microphone mode. Tap Stop, then Start again.",true); } }
+  }));
+  ragaSel.addEventListener("change", () => { state.raga = RAGAS[ragaSel.value]; });
+  $("octave").addEventListener("change", e => state.octave = +e.target.value);
+  $("snap").addEventListener("change", e => state.snap = e.target.value);
+  const bindSlider = (id,out,fn,fmt) => { const el=$(id); const upd=()=>{ $(out).textContent = fmt(el.value); fn(+el.value); }; el.addEventListener("input",upd); upd(); };
+  bindSlider("glide","glideOut",v=>state.glide=v/1000,v=>v+" ms");
+  bindSlider("vol","volOut",v=>state.vol=v/100,v=>v);
+  bindSlider("sens","sensOut",v=>state.sens=v/100,v=>v);
+  bindSlider("droneVol","droneOut",v=>{state.droneVol=v/100; if(droneGain&&ctx) droneGain.gain.setTargetAtTime(state.drone?state.droneVol*0.5:0,ctx.currentTime,0.1);},v=>v);
+  $("drone").addEventListener("change", e => { state.drone = e.target.checked; if(droneGain&&ctx) droneGain.gain.setTargetAtTime(state.drone?state.droneVol*0.5:0,ctx.currentTime,0.1); });
+
+  // ---------- Audio ----------
+  const statusEl = $("status");
+  const setStatus = (t,err) => { statusEl.textContent=t; statusEl.classList.toggle("err",!!err); };
+
+  function noiseBuffer(){
+    const b = ctx.createBuffer(1, ctx.sampleRate*2, ctx.sampleRate);
+    const d = b.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1; return b;
+  }
+
+  function makeInstrument(kind){
+    const out = ctx.createGain(); out.gain.value = 0;
+    const post = ctx.createGain(); post.gain.value = 1; out.connect(post); post.connect(master);
+    const oscs=[], extras=[];
+    let setF;
+    if(kind==="violin"){
+      const o1=ctx.createOscillator(), o2=ctx.createOscillator();
+      o1.type="sawtooth"; o2.type="sawtooth"; o2.detune.value=7;
+      const g2=ctx.createGain(); g2.gain.value=0.6;
+      const body1=ctx.createBiquadFilter(); body1.type="peaking"; body1.frequency.value=290; body1.Q.value=1.2; body1.gain.value=5;
+      const body2=ctx.createBiquadFilter(); body2.type="peaking"; body2.frequency.value=2800; body2.Q.value=1.5; body2.gain.value=6;
+      const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=4800; lp.Q.value=0.6;
+      const pre=ctx.createGain(); pre.gain.value=0.22;
+      o1.connect(pre); o2.connect(g2).connect(pre); pre.connect(body1).connect(body2).connect(lp).connect(out);
+      oscs.push(o1,o2);
+      // bow noise
+      const n=ctx.createBufferSource(); n.buffer=noiseBuffer(); n.loop=true;
+      const bp=ctx.createBiquadFilter(); bp.type="bandpass"; bp.Q.value=3;
+      const ng=ctx.createGain(); ng.gain.value=0.025; n.connect(bp).connect(ng).connect(out); n.start(); extras.push(n);
+      setF=(f,tc)=>{ const t=ctx.currentTime; o1.frequency.setTargetAtTime(f,t,tc); o2.frequency.setTargetAtTime(f,t,tc); bp.frequency.setTargetAtTime(f*3,t,tc); };
+    } else if(kind==="harmonium"){
+      const N=32, re=new Float32Array(N), im=new Float32Array(N);
+      for(let n=1;n<N;n++){ im[n]=Math.sin(Math.PI*n*0.32)/n * (n%2?1:0.7); }
+      const wave=ctx.createPeriodicWave(re,im);
+      const o1=ctx.createOscillator(), o2=ctx.createOscillator(), o3=ctx.createOscillator();
+      [o1,o2,o3].forEach(o=>o.setPeriodicWave(wave));
+      o2.detune.value=5; // double-reed beating
+      const g3=ctx.createGain(); g3.gain.value=0.35; // octave-up reed
+      const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=3200; lp.Q.value=0.5;
+      const pre=ctx.createGain(); pre.gain.value=0.2;
+      o1.connect(pre); o2.connect(pre); o3.connect(g3).connect(pre); pre.connect(lp).connect(out);
+      oscs.push(o1,o2,o3);
+      setF=(f,tc)=>{ const t=ctx.currentTime; const k=Math.min(tc,0.004);
+        o1.frequency.setTargetAtTime(f,t,k); o2.frequency.setTargetAtTime(f,t,k); o3.frequency.setTargetAtTime(f*2,t,k); };
+    } else {
+      const o1=ctx.createOscillator(), o2=ctx.createOscillator();
+      o1.type="sine"; o2.type="triangle";
+      const g2=ctx.createGain(); g2.gain.value=0.12;
+      const pre=ctx.createGain(); pre.gain.value=0.55;
+      o1.connect(pre); o2.connect(g2).connect(pre);
+      const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.frequency.value=3500;
+      pre.connect(lp).connect(out);
+      const n=ctx.createBufferSource(); n.buffer=noiseBuffer(); n.loop=true;
+      const bp=ctx.createBiquadFilter(); bp.type="bandpass"; bp.Q.value=1.5;
+      const ng=ctx.createGain(); ng.gain.value=0.06; n.connect(bp).connect(ng).connect(out); n.start(); extras.push(n);
+      oscs.push(o1,o2);
+      setF=(f,tc)=>{ const t=ctx.currentTime; o1.frequency.setTargetAtTime(f,t,tc); o2.frequency.setTargetAtTime(f*2,t,tc); bp.frequency.setTargetAtTime(f*2,t,tc); };
+    }
+    oscs.forEach(o=>{ o.frequency.value=220; o.start(); });
+    return {
+      kind, setFreq:setF,
+      setAmp(a,fast){ out.gain.setTargetAtTime(a, ctx.currentTime, fast?0.012:0.06); },
+      stop(){ const t=ctx.currentTime; out.gain.setTargetAtTime(0,t,0.03);
+        setTimeout(()=>{ oscs.concat(extras).forEach(o=>{try{o.stop()}catch(e){}}); post.disconnect(); },300); }
+    };
+  }
+  function rebuildInstrument(){ if(!ctx) return; if(instr) instr.stop(); instr=makeInstrument(state.inst); held=null; }
+
+  // Tambura: mandra Pa, Sa, Sa, mandra Sa
+  function pluck(f,t){
+    const o=ctx.createOscillator(), o2=ctx.createOscillator(); o.type="sawtooth"; o2.type="sawtooth";
+    o.frequency.value=f; o2.frequency.value=f*1.0015;
+    const lp=ctx.createBiquadFilter(); lp.type="lowpass"; lp.Q.value=4;
+    lp.frequency.setValueAtTime(5000,t); lp.frequency.exponentialRampToValueAtTime(900,t+2.5);
+    const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.18,t+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001,t+3.4);
+    o.connect(lp); o2.connect(lp); lp.connect(g).connect(droneGain);
+    o.start(t); o2.start(t); o.stop(t+3.5); o2.stop(t+3.5);
+  }
+  let droneNext=0, droneIdx=0;
+  function scheduleDrone(){
+    const seq=[0.75,1,1,0.5], step=0.55;
+    while(droneNext < ctx.currentTime+0.3){
+      pluck(state.sa*seq[droneIdx%4], droneNext);
+      droneNext += step*(droneIdx%4===3?1.6:1); droneIdx++;
+    }
+  }
+  function restartDrone(){ if(!ctx) return; droneNext=ctx.currentTime+0.05; droneIdx=0; }
+
+  // ---------- Pitch detection (YIN, downsampled) ----------
+  const W=512, TAU_MAX=512;
+  const dif=new Float32Array(TAU_MAX);
+  function yin(x, sr){
+    const tauMin=Math.max(2,Math.floor(sr/1100));
+    dif[0]=1; let run=0, best=-1;
+    for(let tau=1;tau<TAU_MAX;tau++){
+      let s=0; for(let j=0;j<W;j++){ const d=x[j]-x[j+tau]; s+=d*d; }
+      run+=s; dif[tau]= run? s*tau/run : 1;
+    }
+    for(let tau=tauMin;tau<TAU_MAX-1;tau++){
+      if(dif[tau]<0.15){ while(tau+1<TAU_MAX-1 && dif[tau+1]<dif[tau]) tau++; best=tau; break; }
+    }
+    if(best<0) return null;
+    const a=dif[best-1], b=dif[best], c=dif[best+1];
+    const shift=(a-c)/(2*(a-2*b+c)) || 0;
+    return { f: sr/(best+shift), conf: 1-b };
+  }
+
+  // ---------- Follow logic ----------
+  const history=[]; // {t, v, a}
+  const centsOf = f => 1200*Math.log2(f/state.sa);
+
+  function snapCents(c){
+    const allowed=state.raga;
+    let bestC=null, bestD=1e9;
+    for(let oct=-2;oct<=3;oct++) for(const s of allowed){ const cc=(oct*12+s)*100; const d=Math.abs(cc-c); if(d<bestD){bestD=d;bestC=cc;} }
+    if(held!==null && Math.abs(c-held)<70 && allowed.includes(((Math.round(held/100)%12)+12)%12)) return held;
+    held=bestC; return bestC;
+  }
+
+  function tick(){
+    analyser.getFloatTimeDomainData(buf);
+    // downsample x2 with simple averaging
+    let rms=0;
+    for(let i=0;i<down.length;i++){ const v=(buf[2*i]+buf[2*i+1])*0.5; down[i]=v; rms+=v*v; }
+    rms=Math.sqrt(rms/down.length);
+    $("meterBar").style.width = Math.min(100, Math.sqrt(rms)*260) + "%";
+    const speaker = state.output==="speaker";
+    const gate = 0.003 + (1-state.sens)*0.04 + (speaker?0.006:0);
+    let voiceC=null, instC=null;
+    const now=performance.now();
+    if(rms>gate){
+      const r=yin(down, ctx.sampleRate/2);
+      if(r && r.f>60 && r.f<1100 && (!speaker || r.conf>0.88)){
+        let f=r.f;
+        if(lastF){ const ratio=f/lastF; if((ratio>1.85&&ratio<2.15)||(ratio>0.465&&ratio<0.54)){ if(octaveSkip<2){ octaveSkip++; f=lastF; } } else octaveSkip=0; }
+        lastF=f;
+        voiceC=centsOf(f);
+        const snapOn = state.snap==="raga" || (state.snap==="auto" && state.inst==="harmonium");
+        instC = snapOn ? snapCents(voiceC) : voiceC;
+        const outF = state.sa*Math.pow(2,instC/1200)*Math.pow(2,state.octave);
+        instr.setFreq(outF, state.glide/2.5);
+        const level=Math.min(1,Math.pow((rms-gate)/0.12,0.6));
+        ampSmooth = level;
+        instr.setAmp(level*state.vol*0.9, true);
+        updateSwara(voiceC);
+      }
+    } else {
+      lastF=null; held=null;
+      instr.setAmp(0,false);
+      if(ampSmooth>0){ ampSmooth=0; $("swara").innerHTML="–"; }
+    }
+    history.push({t:now, v:voiceC, a:instC});
+    while(history.length && now-history[0].t>6000) history.shift();
+  }
+
+  function updateSwara(c){
+    const semi=Math.round(c/100), pc=((semi%12)+12)%12, off=Math.round(c-semi*100);
+    const reg = semi<0?"mandra":semi>=12?"tara":"";
+    $("swara").innerHTML = SWARA[pc] + `<small>${reg?reg+" · ":""}${off>=0?"+":""}${off}¢</small>`;
+  }
+
+  // ---------- Drawing ----------
+  const cv=$("trace"), g=cv.getContext("2d");
+  const LO=-800, HI=1900;
+  function css(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+  function draw(){
+    const dpr=window.devicePixelRatio||1, w=cv.clientWidth, h=cv.clientHeight;
+    if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){ cv.width=Math.round(w*dpr); cv.height=Math.round(h*dpr); }
+    g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,w,h);
+    const y=c=>h-((c-LO)/(HI-LO))*h;
+    g.font='12px Hind, system-ui, sans-serif'; g.textBaseline="middle";
+    const lane=css("--lane"), muted=css("--muted"), kum=css("--kumkum");
+    for(let oct=-1;oct<=1;oct++) for(const s of state.raga){
+      const c=(oct*12+s)*100; if(c<LO||c>HI) continue;
+      const yy=y(c);
+      g.strokeStyle = s===0?kum:lane; g.globalAlpha = s===0?0.5:1; g.lineWidth = s===0?1.5:1;
+      g.beginPath(); g.moveTo(34,yy); g.lineTo(w,yy); g.stroke(); g.globalAlpha=1;
+      g.fillStyle = s===0?kum:muted; g.fillText(SWARA[s]+(oct<0?"̣":oct>0?"̇":""),8,yy);
+    }
+    const now=performance.now(), span=6000;
+    const xOf=t=>34+(w-34)*(1-(now-t)/span);
+    const line=(key,color,width)=>{
+      g.strokeStyle=color; g.lineWidth=width; g.lineJoin="round"; g.beginPath(); let pen=false;
+      for(const p of history){ const c=p[key]; if(c===null||c<LO-200||c>HI+200){pen=false;continue;}
+        const X=xOf(p.t), Y=y(c); if(!pen){g.moveTo(X,Y);pen=true;} else g.lineTo(X,Y); }
+      g.stroke();
+    };
+    line("a",css("--instr"),4);
+    line("v",css("--voice"),1.8);
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+
+  // ---------- Start / stop ----------
+  async function start(){
+    try{
+      if(!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+        setStatus("Microphone isn't available inside the Claude artifact viewer, in any browser. Host this file at its own web address (for example with Netlify Drop or Vercel) and open that link instead.", true);
+        return;
+      }
+      setStatus("Asking for the microphone…");
+      const AC = window.AudioContext||window.webkitAudioContext;
+      try{ ctx = new AC({latencyHint:"interactive"}); }catch(e){ ctx = new AC(); }
+      const resuming = ctx.resume(); // must start inside the tap, before any await (iPhone)
+      micHp=ctx.createBiquadFilter(); micHp.type="highpass"; micHp.frequency.value=60;
+      analyser=ctx.createAnalyser(); analyser.fftSize=2048;
+      micHp.connect(analyser);
+      await openMic();
+      await resuming; if(ctx.state!=="running") await ctx.resume();
+      buf=new Float32Array(2048); down=new Float32Array(1024);
+      master=ctx.createGain(); master.gain.value=1;
+      const comp=ctx.createDynamicsCompressor(); comp.threshold.value=-12; comp.ratio.value=4;
+      master.connect(comp).connect(ctx.destination);
+      droneGain=ctx.createGain(); droneGain.gain.value=state.drone?state.droneVol*0.5:0; droneGain.connect(master);
+      instr=makeInstrument(state.inst);
+      restartDrone(); droneTimer=setInterval(scheduleDrone,100);
+      pollTimer=setInterval(tick,8);
+      running=true;
+      const b=$("start"); b.textContent="Stop"; b.classList.add("on");
+      const out=((ctx.baseLatency||0)+(ctx.outputLatency||0))*1000;
+      const analysis=(W+TAU_MAX)/(ctx.sampleRate/2)*1000/2 + 4;
+      $("latency").textContent=`Estimated delay: ≈${Math.round(out+analysis)} ms`;
+      setStatus(state.output==="speaker"?"Listening on speaker. Sing a line.":"Listening on headphones. Sing a line.");
+    }catch(e){
+      stop(true);
+      const blocked = e && (e.name==="NotAllowedError"||e.name==="SecurityError");
+      setStatus(blocked
+        ? "Microphone access was blocked here. If you're in the Claude app, open the link in Chrome or Safari; in a browser, allow the microphone for this site and tap Start again."
+        : "The microphone couldn't start: "+((e&&(e.name+" – "+e.message))||"unknown error")+". Close other apps using the mic and try again.", true);
+    }
+  }
+  async function openMic(){
+    const speaker = state.output==="speaker";
+    const next = await navigator.mediaDevices.getUserMedia({audio:{
+      echoCancellation:speaker, noiseSuppression:false, autoGainControl:false }});
+    if(micSrc){ try{micSrc.disconnect()}catch(e){} }
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    stream=next;
+    micSrc=ctx.createMediaStreamSource(stream);
+    micSrc.connect(micHp);
+    held=null; lastF=null;
+  }
+  function stop(silent){
+    clearInterval(pollTimer); clearInterval(droneTimer);
+    if(instr){ try{instr.stop()}catch(e){} instr=null; }
+    if(stream) stream.getTracks().forEach(t=>t.stop());
+    if(ctx) setTimeout(()=>{ try{ctx.close()}catch(e){} ctx=null; },350);
+    stream=null; micSrc=null; running=false; held=null; lastF=null;
+    const b=$("start"); b.textContent="Start listening"; b.classList.remove("on");
+    $("swara").innerHTML="–"; $("meterBar").style.width="0";
+    if(!silent) setStatus("Stopped. Tap Start to sing again.");
+  }
+  $("start").addEventListener("click",()=> running?stop():start());
+})();
+</script>
+</body>
+</html>
