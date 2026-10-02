@@ -75,6 +75,8 @@ input[type=range]{width:100%;accent-color:var(--brass)}
 .toggle input{width:22px;height:22px;accent-color:var(--brass)}
 .note{margin-top:22px;padding:14px 16px;border-left:3px solid var(--brass);background:var(--surface);border-radius:0 12px 12px 0;color:var(--muted);font-size:.92rem}
 .note strong{color:var(--ink)}
+.credit{margin-top:14px;font-size:.8rem;color:var(--muted)}
+.credit a{color:inherit}
 :focus-visible{outline:2px solid var(--kumkum);outline-offset:2px}
 @media (max-width:420px){.row{grid-template-columns:1fr}}
 </style>
@@ -178,6 +180,7 @@ input[type=range]{width:100%;accent-color:var(--brass)}
 <div class="note">
   <strong>Headphones or speaker?</strong> Wired headphones give the tightest follow, roughly 30–60 ms behind your voice. On the phone speaker, the app switches on echo cancellation so it doesn't chase its own sound; that adds a little delay and works best with the phone a short distance away and the instrument volume moderate. Avoid Bluetooth earbuds or speakers: they add 150–250 ms, which turns accompaniment into an echo.
 </div>
+<p class="credit">Instrument recordings: <a href="https://github.com/nbrosowsky/tonejs-instruments">tonejs-instruments</a> by Nicholas Brosowsky, licensed CC BY 3.0.</p>
 </main>
 
 <script>
@@ -224,7 +227,7 @@ input[type=range]{width:100%;accent-color:var(--brass)}
   let held=null, lastF=null, octaveSkip=0, ampSmooth=0;
   // ---------- UI wiring ----------
   document.querySelectorAll('input[name=inst]').forEach(r => r.addEventListener("change", e => {
-    state.inst = e.target.value; $("instHint").textContent = hints[state.inst]; rebuildInstrument();
+    state.inst = e.target.value; $("instHint").textContent = hints[state.inst]; prefetch(state.inst); rebuildInstrument();
   }));
   shrutiSel.addEventListener("change", () => { state.sa = C3*Math.pow(2, +shrutiSel.value/12); restartDrone(); });
   document.querySelectorAll('input[name=out]').forEach(r => r.addEventListener("change", async e => {
@@ -308,7 +311,73 @@ input[type=range]{width:100%;accent-color:var(--brass)}
         setTimeout(()=>{ oscs.concat(extras).forEach(o=>{try{o.stop()}catch(e){}}); post.disconnect(); },300); }
     };
   }
-  function rebuildInstrument(){ if(!ctx) return; if(instr) instr.stop(); instr=makeInstrument(state.inst); held=null; }
+  // ---------- Real instrument recordings ----------
+  const SAMPLE_BASE="https://cdn.jsdelivr.net/gh/nbrosowsky/tonejs-instruments@master/samples/";
+  const SAMPLE_SETS={
+    violin:{notes:["G3","C4","E4","G4","A4","C5","E5","G5","A5","C6","E6"], start:0.04, loopStart:1.2, low:196},
+    harmonium:{notes:["C2","Ds2","Fs2","A2","C3","Ds3","Fs3","A3","C4","Ds4","Fs4","A4","C5"], start:0.9, loopStart:2.0, low:65.4},
+    flute:{notes:["C4","E4","A4","C5","E5","A5","C6"], start:0.18, loopStart:1.5, low:261.6}
+  };
+  const PCS={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+  const noteFreq=n=>{ const m=n.match(/^([A-G])(s?)(\d)$/); const midi=12*(+m[3]+1)+PCS[m[1]]+(m[2]?1:0); return 440*Math.pow(2,(midi-69)/12); };
+  const sampleCache={}, sampleReady={};
+  const prefetch=kind=>SAMPLE_SETS[kind].notes.forEach(n=>fetch(SAMPLE_BASE+kind+"/"+n+".mp3").catch(()=>{}));
+  prefetch("violin");
+  function loadSamples(kind){
+    if(sampleCache[kind]) return sampleCache[kind];
+    const decode=ab=>new Promise((res,rej)=>ctx.decodeAudioData(ab,res,rej));
+    sampleCache[kind]=Promise.all(SAMPLE_SETS[kind].notes.map(n=>
+      fetch(SAMPLE_BASE+kind+"/"+n+".mp3").then(r=>{ if(!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+        .then(decode).then(buf=>({f:noteFreq(n),buf}))))
+      .then(list=>{ sampleReady[kind]=list; return list; })
+      .catch(e=>{ delete sampleCache[kind]; throw e; });
+    return sampleCache[kind];
+  }
+  function makeSampled(kind,list){
+    const cfg=SAMPLE_SETS[kind];
+    const out=ctx.createGain(); out.gain.value=0;
+    const post=ctx.createGain(); post.gain.value=1.5; out.connect(post); post.connect(master);
+    let cur=null, on=false;
+    const pick=f=>list.reduce((a,b)=>Math.abs(Math.log2(f/b.f))<Math.abs(Math.log2(f/a.f))?b:a);
+    function startSource(f,fresh){
+      const s=pick(f), t=ctx.currentTime;
+      const src=ctx.createBufferSource(); src.buffer=s.buf; src.loop=true;
+      src.loopStart=cfg.loopStart; src.loopEnd=Math.max(cfg.loopStart+1,s.buf.duration-0.6);
+      src.playbackRate.value=f/s.f;
+      const g=ctx.createGain(); g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(1,t+(fresh?0.012:0.04));
+      src.connect(g).connect(out); src.start(t, fresh?cfg.start:cfg.loopStart);
+      if(cur){ const old=cur; old.g.gain.setTargetAtTime(0,t,0.015); setTimeout(()=>{try{old.src.stop()}catch(e){}},150); }
+      cur={src,g,root:s.f};
+    }
+    return {
+      kind, sampled:true,
+      setFreq(f,tc){
+        if(!on) return;
+        if(!cur) startSource(f,true);
+        else if(Math.abs(Math.log2(f/cur.root))>0.3) startSource(f,false);
+        cur.src.playbackRate.setTargetAtTime(f/cur.root, ctx.currentTime, Math.max(tc,0.003));
+      },
+      setAmp(a,fast){
+        const t=ctx.currentTime;
+        if(a>0.001){ on=true; out.gain.setTargetAtTime(a,t,fast?0.012:0.06); }
+        else { out.gain.setTargetAtTime(0,t,0.07);
+          if(on){ on=false; const c=cur; cur=null; if(c) setTimeout(()=>{try{c.src.stop()}catch(e){}},600); } }
+      },
+      stop(){ out.gain.setTargetAtTime(0,ctx.currentTime,0.03); const c=cur; cur=null;
+        setTimeout(()=>{ if(c) try{c.src.stop()}catch(e){} post.disconnect(); },300); }
+    };
+  }
+  function rebuildInstrument(){
+    if(!ctx) return; if(instr) instr.stop(); held=null;
+    const kind=state.inst, names={violin:"violin",harmonium:"harmonium",flute:"flute"};
+    if(sampleReady[kind]){ instr=makeSampled(kind,sampleReady[kind]); return; }
+    instr=makeInstrument(kind);
+    setStatus("Loading the real "+names[kind]+" sound… you can sing meanwhile.");
+    loadSamples(kind).then(list=>{
+      if(ctx && running && state.inst===kind && !(instr&&instr.sampled)){ instr.stop(); instr=makeSampled(kind,list); }
+      if(state.inst===kind) setStatus("Real "+names[kind]+" ready. Sing a line.");
+    }).catch(()=>{ if(state.inst===kind) setStatus("Couldn't load the real "+names[kind]+" sound, so a simpler built-in one is playing. Check your connection.", true); });
+  }
 
   // Tambura: mandra Pa, Sa, Sa, mandra Sa
   function pluck(f,t){
@@ -382,11 +451,13 @@ input[type=range]{width:100%;accent-color:var(--brass)}
         voiceC=centsOf(f);
         const snapOn = state.snap==="raga" || (state.snap==="auto" && state.inst==="harmonium");
         instC = snapOn ? snapCents(voiceC) : voiceC;
-        const outF = state.sa*Math.pow(2,instC/1200)*Math.pow(2,state.octave);
-        instr.setFreq(outF, state.glide/2.5);
+        let outF = state.sa*Math.pow(2,instC/1200)*Math.pow(2,state.octave);
+        const low = SAMPLE_SETS[state.inst].low*0.94;
+        while(outF < low) outF*=2; // keep within the instrument's real range
         const level=Math.min(1,Math.pow((rms-gate)/0.12,0.6));
         ampSmooth = level;
-        instr.setAmp(level*state.vol*0.9, true);
+        instr.setAmp(Math.max(0.002,level*state.vol*0.9), true);
+        instr.setFreq(outF, state.glide/2.5);
         updateSwara(voiceC);
       }
     } else {
@@ -457,7 +528,8 @@ input[type=range]{width:100%;accent-color:var(--brass)}
       const comp=ctx.createDynamicsCompressor(); comp.threshold.value=-12; comp.ratio.value=4;
       master.connect(comp).connect(ctx.destination);
       droneGain=ctx.createGain(); droneGain.gain.value=state.drone?state.droneVol*0.5:0; droneGain.connect(master);
-      instr=makeInstrument(state.inst);
+      running=true;
+      rebuildInstrument();
       restartDrone(); droneTimer=setInterval(scheduleDrone,100);
       pollTimer=setInterval(tick,8);
       running=true;
@@ -465,7 +537,7 @@ input[type=range]{width:100%;accent-color:var(--brass)}
       const out=((ctx.baseLatency||0)+(ctx.outputLatency||0))*1000;
       const analysis=(W+TAU_MAX)/(ctx.sampleRate/2)*1000/2 + 4;
       $("latency").textContent=`Estimated delay: ≈${Math.round(out+analysis)} ms`;
-      setStatus(state.output==="speaker"?"Listening on speaker. Sing a line.":"Listening on headphones. Sing a line.");
+      if(instr && instr.sampled) setStatus(state.output==="speaker"?"Listening on speaker. Sing a line.":"Listening on headphones. Sing a line.");
     }catch(e){
       stop(true);
       const blocked = e && (e.name==="NotAllowedError"||e.name==="SecurityError");
